@@ -733,12 +733,21 @@ static int print_media_desc(const pjmedia_sdp_media *m, char *buf, pj_size_t len
     pj_memcpy(p, m->desc.transport.ptr, m->desc.transport.slen);
     p += m->desc.transport.slen;
     for (i=0; i<m->desc.fmt_count; ++i) {
-	*p++ = ' ';
-	pj_memcpy(p, m->desc.fmt[i].ptr, m->desc.fmt[i].slen);
-	p += m->desc.fmt[i].slen;
+	if (end-p > m->desc.fmt[i].slen) {
+	    *p++ = ' ';
+	    pj_memcpy(p, m->desc.fmt[i].ptr, m->desc.fmt[i].slen);
+	    p += m->desc.fmt[i].slen;
+	} else {
+	    return -1;
+	}
     }
-    *p++ = '\r';
-    *p++ = '\n';
+
+    if (end-p >= 2) {
+	*p++ = '\r';
+	*p++ = '\n';
+    } else {
+	return -1;
+    }
 
     /* print connection info, if present. */
     if (m->conn) {
@@ -974,13 +983,13 @@ static void parse_version(pj_scanner *scanner,
     ctx->last_error = PJMEDIA_SDP_EINVER;
 
     /* check equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if (scanner->curptr+1 >= scanner->end || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return;
     }
 
     /* check version is 0 */
-    if (*(scanner->curptr+2) != '0') {
+    if (scanner->curptr+2 >= scanner->end || *(scanner->curptr+2) != '0') {
 	on_scanner_error(scanner);
 	return;
     }
@@ -997,7 +1006,7 @@ static void parse_origin(pj_scanner *scanner, pjmedia_sdp_session *ses,
     ctx->last_error = PJMEDIA_SDP_EINORIGIN;
 
     /* check equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if (scanner->curptr+1 >= scanner->end || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return;
     }
@@ -1043,7 +1052,7 @@ static void parse_time(pj_scanner *scanner, pjmedia_sdp_session *ses,
     ctx->last_error = PJMEDIA_SDP_EINTIME;
 
     /* check equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if (scanner->curptr+1 >= scanner->end || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return;
     }
@@ -1071,7 +1080,7 @@ static void parse_generic_line(pj_scanner *scanner, pj_str_t *str,
     ctx->last_error = PJMEDIA_SDP_EINSDP;
 
     /* check equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if ((scanner->curptr+1 >= scanner->end) || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return;
     }
@@ -1140,7 +1149,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
     ctx->last_error = PJMEDIA_SDP_EINMEDIA;
 
     /* check the equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if (scanner->curptr+1 >= scanner->end || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return;
     }
@@ -1155,6 +1164,10 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
     /* port */
     pj_scan_get(scanner, &cs_token, &str);
     med->desc.port = (unsigned short)pj_strtoul(&str);
+    if (pj_scan_is_eof(scanner)) {
+        on_scanner_error(scanner);
+        return;
+    }
     if (*scanner->curptr == '/') {
 	/* port count */
 	pj_scan_get_char(scanner);
@@ -1166,7 +1179,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
     }
 
     if (pj_scan_get_char(scanner) != ' ') {
-	PJ_THROW(SYNTAX_ERROR);
+	on_scanner_error(scanner);
     }
 
     /* transport */
@@ -1174,7 +1187,7 @@ static void parse_media(pj_scanner *scanner, pjmedia_sdp_media *med,
 
     /* format list */
     med->desc.fmt_count = 0;
-    while (*scanner->curptr == ' ') {
+    while (scanner->curptr < scanner->end && *scanner->curptr == ' ') {
 	pj_str_t fmt;
 
 	pj_scan_get_char(scanner);
@@ -1214,7 +1227,7 @@ static pjmedia_sdp_attr *parse_attr( pj_pool_t *pool, pj_scanner *scanner,
     attr = PJ_POOL_ALLOC_T(pool, pjmedia_sdp_attr);
 
     /* check equal sign */
-    if (*(scanner->curptr+1) != '=') {
+    if (scanner->curptr+1 >= scanner->end || *(scanner->curptr+1) != '=') {
 	on_scanner_error(scanner);
 	return NULL;
     }
@@ -1233,7 +1246,7 @@ static pjmedia_sdp_attr *parse_attr( pj_pool_t *pool, pj_scanner *scanner,
 	    pj_scan_get_char(scanner);
 
 	/* get value */
-	if (*scanner->curptr != '\r' && *scanner->curptr != '\n') {
+	if (!pj_scan_is_eof(scanner) && *scanner->curptr != '\r' && *scanner->curptr != '\n') {
 	    pj_scan_get_until_chr(scanner, "\r\n", &attr->value);
 	} else {
 	    attr->value.ptr = NULL;
